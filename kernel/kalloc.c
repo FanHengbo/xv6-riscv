@@ -8,6 +8,7 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
+#include "proc.h"
 
 void freerange(void *pa_start, void *pa_end);
 
@@ -79,4 +80,31 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+uint64  
+kfreecount(void)
+{
+  uint64 sz0 = (uint64)sbrk(0);
+  int n = 0;
+
+  while(1){
+    if((uint64)sbrk(PGSIZE) == 0xffffffffffffffff){
+      break;
+    }
+    n += PGSIZE;
+  }
+  sbrk(-((uint64)sbrk(0) - sz0));
+  return n;
+}
+
+uint64
+sbrk(int n)
+{
+  int addr;
+
+  addr = myproc()->sz;
+  if(growproc(n) < 0)
+    return -1;
+  return addr;
 }
