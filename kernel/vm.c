@@ -432,3 +432,18 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+int sum(int x) {
+  int sum = 0;
+  for (int i = 0; i <= x; i++) {
+    sum += i;
+  }
+  return sum;
+}
+
+void test() {
+  for (int i = 0; i < 5; i++) {
+    printf("sum = %d\n", sum(i));
+  }
+  return;
+}

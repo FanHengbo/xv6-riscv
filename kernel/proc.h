@@ -82,6 +82,7 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -97,6 +98,10 @@ struct proc {
   struct proc *parent;         // Parent process
 
   // these are private to the process, so p->lock need not be held.
+  uint64 interval;             // Alarm interval
+  uint64 handler;              // Handler function pointer
+  uint64 ticks_passed;         // How many ticks has passed
+  struct trapframe saved_regs; // Save user program regs before go into interrupt handler
   uint64 kstack;               // Virtual address of kernel stack
   uint64 sz;                   // Size of process memory (bytes)
   pagetable_t pagetable;       // User page table
