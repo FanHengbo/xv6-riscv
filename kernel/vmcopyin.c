@@ -4,7 +4,7 @@
 #include "defs.h"
 #include "spinlock.h"
 #include "proc.h"
-
+#include "memlayout.h"
 //
 // This file contains copyin_new() and copyinstr_new(), the
 // replacements for copyin and coyinstr in vm.c.

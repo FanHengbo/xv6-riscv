@@ -116,6 +116,16 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  if (kvmmapuser(p, 0) < 0){
+    panic("mapuser");
+  }
+
+  if (p->pid == 1){
+    vmprint(p->pagetable);
+    //walk_and_print((pagetable_t)PTE2PA(p->kpagetable[0]), 1);
+  }
+    
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

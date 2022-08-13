@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+//#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -47,6 +48,26 @@ kvminit()
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
+
+pagetable_t kvmcreate() {
+  pagetable_t kpagetable = (pagetable_t) kalloc();
+  memset(kpagetable, 0, PGSIZE);
+
+  for (int i = 1; i < 512;i++) {
+    kpagetable[i] = kernel_pagetable[i];
+  }
+
+  mappages(kpagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
+  mappages(kpagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+  mappages(kpagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W);
+  mappages(kpagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+
+  return kpagetable;
+}
+
+
+
+
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 void
@@ -55,6 +76,7 @@ kvminithart()
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
+
 
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
@@ -110,6 +132,8 @@ walkaddr(pagetable_t pagetable, uint64 va)
   pa = PTE2PA(*pte);
   return pa;
 }
+
+
 
 // add a mapping to the kernel page table.
 // only used when booting.
@@ -379,23 +403,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
-
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
-
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -405,38 +413,30 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+  return copyinstr_new(pagetable, dst, srcva, max);
+}
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+void vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
+  walk_and_print(pagetable, 2);
+}
+
+void walk_and_print(pagetable_t pagetable, int level) {
+  if (level < 0)
+    return;
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V)){
+      if (level == 1)
+        printf(".. ");
+      if (level == 0)
+        printf(".. .. ");
+      // This PTE points to a lower level page table. Need to print infomation.
+      uint64 child = PTE2PA(pte);
+      printf("..%d: pte %p pa %p\n", i, pte, child);
+      walk_and_print((pagetable_t)child, level-1);
       }
-      --n;
-      --max;
-      p++;
-      dst++;
     }
-
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
 }

@@ -20,6 +20,7 @@ static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+extern pagetable_t kernel_pagetable;
 
 // initialize the proc table at boot time.
 void
@@ -121,6 +122,7 @@ found:
     return 0;
   }
 
+  p->kpagetable = kvmcreate();
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -141,6 +143,9 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+  freekpagetable(p->kpagetable);
+  p->kpagetable = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -229,6 +234,9 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+  if (kvmmapuser(p, 0) < 0){
+    panic("mapuser");
+  }
 
   release(&p->lock);
 }
@@ -239,9 +247,14 @@ int
 growproc(int n)
 {
   uint sz;
+  uint oldsz;
   struct proc *p = myproc();
 
   sz = p->sz;
+  oldsz = p->sz;
+  if (sz + n >= PLIC)
+    return -1;
+
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
@@ -249,7 +262,9 @@ growproc(int n)
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
+  
   p->sz = sz;
+  kvmmapuser(p, oldsz);
   return 0;
 }
 
@@ -276,7 +291,7 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
-
+  
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -297,6 +312,9 @@ fork(void)
 
   release(&np->lock);
 
+  if (kvmmapuser(np, 0) < 0){
+    panic("mapuser");
+  }
   return pid;
 }
 
@@ -473,13 +491,17 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        w_satp(MAKE_SATP(p->kpagetable));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-
         found = 1;
+        kvminithart();
       }
       release(&p->lock);
     }
@@ -696,4 +718,49 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void freekpagetable(pagetable_t kpagetable) {
+  pte_t pte = kpagetable[0];
+  pagetable_t midlevel = (pagetable_t)(PTE2PA(pte));
+
+  for (int i = 0; i < 512; i++) {
+    pte = midlevel[i];
+    if(pte & PTE_V){
+      kfree((void *)PTE2PA(pte));
+      midlevel[i] = 0;
+    }
+  }
+  kfree((void*)midlevel);
+  kfree((void *)kpagetable);
+}
+
+int kvmmapuser(struct proc* p, uint64 oldsz) 
+{
+  if (p->sz >= PLIC)
+    panic("kvmuser: new size too large");
+  
+  uint64 va = oldsz;
+  uint64 endva = p->sz;
+  pte_t *upte_ptr, *kpte_ptr;
+
+  while (va < endva) {
+    upte_ptr = walk(p->pagetable, va, 0);
+    if (!upte_ptr || (*upte_ptr & PTE_V) == 0)
+      panic("no upte");
+    kpte_ptr = walk(p->kpagetable, va ,1);
+    if (!kpte_ptr)
+      panic("no kpte");
+    *kpte_ptr = *upte_ptr;
+    *kpte_ptr &= ~(PTE_U | PTE_W | PTE_X);
+    va += PGSIZE;
+  }
+  
+  if (oldsz > p->sz) {
+    for (va = p->sz; va < oldsz; va += PGSIZE) {
+      kpte_ptr = walk(p->kpagetable, va, 0);
+      *kpte_ptr &= (~PTE_V);
+    }
+  }
+  return 0;
 }
