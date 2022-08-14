@@ -268,7 +268,7 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if(uvmcopy_lazy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -693,4 +693,45 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int lazyallocation(struct proc* p, uint64 va)
+{
+  if (va >= p->sz || va <= PGROUNDDOWN(p->trapframe->sp) || va >= MAXVA) {
+    goto bad;
+  }
+  uint64 a = PGROUNDDOWN(va);
+  uint64 newsize;
+  if ((newsize = uvmalloc(p->pagetable, a, a + PGSIZE)) == 0) {
+    goto bad;
+  }
+  return 0;
+
+  bad:
+    return -1;
+}
+
+void vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+
+  walk_and_print(pagetable, 2);
+}
+
+void walk_and_print(pagetable_t pagetable, int level) {
+  if (level < 0)
+    return;
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V)){
+      if (level == 1)
+        printf(".. ");
+      if (level == 0)
+        printf(".. .. ");
+      // This PTE points to a lower level page table. Need to print infomation.
+      uint64 child = PTE2PA(pte);
+      printf("..%d: pte %p pa %p\n", i, pte, child);
+      walk_and_print((pagetable_t)child, level-1);
+      }
+    }
 }

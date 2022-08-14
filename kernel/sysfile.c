@@ -73,8 +73,10 @@ sys_read(void)
   int n;
   uint64 p;
 
+
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+  
   return fileread(f, p, n);
 }
 
@@ -462,11 +464,15 @@ sys_pipe(void)
   int fd0, fd1;
   struct proc *p = myproc();
 
+
   if(argaddr(0, &fdarray) < 0)
     return -1;
   if(pipealloc(&rf, &wf) < 0)
     return -1;
   fd0 = -1;
+
+ 
+
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
     if(fd0 >= 0)
       p->ofile[fd0] = 0;
