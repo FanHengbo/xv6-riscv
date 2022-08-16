@@ -20,7 +20,7 @@ static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
-
+extern int page_reference_count[PHYSTOP/PGSIZE];
 // initialize the proc table at boot time.
 void
 procinit(void)
@@ -693,4 +693,24 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int copy_to_new_page(pte_t *pte_ptr) {
+  
+  uint64 oldpa;
+  char *mem;
+  uint flags;
+
+  oldpa = PTE2PA(*pte_ptr);
+  flags = PTE_FLAGS(*pte_ptr);
+
+  if((mem = kalloc()) == 0) {
+    return -1;
+  }
+  memmove(mem, (char*)oldpa, PGSIZE);
+  flags &= ~(PTE_COW);
+  flags |= PTE_W;
+  *pte_ptr = PA2PTE((uint64)mem) | flags | PTE_V;
+  kfree((void*)oldpa);
+  return 0;
 }

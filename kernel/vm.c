@@ -15,6 +15,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern int page_reference_count[PHYSTOP/PGSIZE];
 /*
  * create a direct-map page table for the kernel.
  */
@@ -71,8 +72,8 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
-  if(va >= MAXVA)
-    panic("walk");
+  //if(va >= MAXVA)
+    //panic("walk");
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -308,29 +309,27 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
+  pte_t *pte_old;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+    if((pte_old = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
+    if((*pte_old & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    *pte_old &= ~(PTE_W);
+    *pte_old |= PTE_COW;
+    pa = PTE2PA(*pte_old);
+    flags = PTE_FLAGS(*pte_old);
+    increcount(pa);
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
   }
   return 0;
 
- err:
+  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
@@ -355,10 +354,19 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte_ptr;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
+    if (va0 >= MAXVA || (pte_ptr = walk(pagetable, va0, 0)) == 0 ||(*pte_ptr & PTE_V) == 0) {
+      return -1;
+    }
+    if (*pte_ptr & PTE_COW) {
+      if (copy_to_new_page(pte_ptr) < 0) {
+        return -1;
+      }
+    }
+    pa0 = PTE2PA(*pte_ptr);
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
@@ -439,4 +447,16 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int store_exception_handler(pagetable_t pagetable, uint64 va) {
+  pte_t *pte_ptr;
+  va = PGROUNDDOWN(va);
+    if (va < MAXVA && (pte_ptr = walk(pagetable, va, 0)) && (*pte_ptr & PTE_U) && (*pte_ptr & PTE_V) && (*pte_ptr & PTE_COW)) {
+        if (copy_to_new_page(pte_ptr) < 0) 
+          return -1;
+    } else {
+      return -1;
+    }
+  return 0;
 }

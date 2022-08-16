@@ -23,6 +23,26 @@ struct {
   struct run *freelist;
 } kmem;
 
+// Needed by COW. To track the reference count of each page, when it comes to 0, free the page. It can be indexed by PA/PGSIZE.
+int page_reference_count[PHYSTOP/PGSIZE+1]; 
+
+
+void increcount(uint64 pa) {
+  int index = pa/ PGSIZE;
+  acquire(&kmem.lock);
+  page_reference_count[index]++;
+  release(&kmem.lock);
+  return;
+}
+
+void decrecount(uint64 pa) {
+  int index = pa/ PGSIZE;
+  acquire(&kmem.lock);
+  page_reference_count[index]--;
+  release(&kmem.lock);
+  return;
+}
+
 void
 kinit()
 {
@@ -35,8 +55,11 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
+    page_reference_count[(uint64)p/PGSIZE] = 0;
     kfree(p);
+  }
+   
 }
 
 // Free the page of physical memory pointed at by v,
@@ -51,6 +74,16 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&kmem.lock);
+  int index = (uint64)pa / PGSIZE;
+  if (page_reference_count[index]) {
+    page_reference_count[index]--;
+    if (page_reference_count[index]) {
+      release(&kmem.lock);
+      return;
+    }
+  }
+  release(&kmem.lock);
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -76,7 +109,9 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r) {
     memset((char*)r, 5, PGSIZE); // fill with junk
+    page_reference_count[(uint64)r/PGSIZE] = 1;
+  }
   return (void*)r;
 }
