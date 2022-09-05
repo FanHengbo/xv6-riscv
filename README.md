@@ -32,9 +32,9 @@ I learned 6.S081 in August 2022. The labs in this famous open course is really i
 - [x] Lecture 14
   - [ ] Read Chapter 8
 - [x] Lecture 15
-  - [ ] Read Chapter 8
-  - [ ] Lab Fs
-- [ ] Lecture 16
+  - [x] Read Chapter 8
+  - [x] Lab Fs
+- [x] Lecture 16
 - [ ] Lecture 17
 - [ ] Lecture 18
 - [ ] Lecture 19
